@@ -3,15 +3,14 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Morse Decoder Pro</title>
+    <title>Morse Decoder Pro V4</title>
     <style>
         :root { --green: #00ff41; --bg: #0b0e11; --card: #161b22; }
         body { font-family: 'Segoe UI', sans-serif; background: var(--bg); color: var(--green); text-align: center; padding: 20px; }
         .container { max-width: 400px; margin: auto; border: 1px solid var(--green); padding: 25px; border-radius: 15px; background: var(--card); box-shadow: 0 0 20px rgba(0,255,65,0.1); }
-        .upload-area { border: 2px dashed #30363d; padding: 30px; border-radius: 10px; margin-bottom: 20px; cursor: pointer; transition: 0.3s; }
-        .upload-area:hover { border-color: var(--green); background: rgba(0,255,65,0.05); }
-        #result { font-size: 22px; margin-top: 20px; min-height: 100px; background: var(--bg); padding: 15px; border-radius: 8px; border: 1px solid #30363d; word-wrap: break-word; color: #fff; line-height: 1.5; }
-        button { width: 100%; padding: 15px; background: var(--green); color: #000; border: none; border-radius: 8px; font-weight: bold; cursor: pointer; font-size: 16px; text-transform: uppercase; }
+        .upload-area { border: 2px dashed #30363d; display: block; padding: 30px; border-radius: 10px; margin-bottom: 20px; cursor: pointer; }
+        #result { font-size: 20px; margin-top: 20px; min-height: 100px; background: var(--bg); padding: 15px; border-radius: 8px; border: 1px solid #30363d; word-wrap: break-word; color: #fff; text-align: left; }
+        button { width: 100%; padding: 15px; background: var(--green); color: #000; border: none; border-radius: 8px; font-weight: bold; cursor: pointer; text-transform: uppercase; }
         #status { margin-bottom: 10px; font-size: 0.85em; color: #ffeb3b; }
         input[type="file"] { display: none; }
     </style>
@@ -19,16 +18,16 @@
 <body>
 
 <div class="container">
-    <h3>📡 Morse Decoder Pro</h3>
-    <p style="color: #888; font-size: 0.8em; margin-bottom: 20px;">Share audio WA ke "Downloads", lalu upload di sini.</p>
+    <h3>📡 Morse Decoder V4</h3>
+    <p style="color: #888; font-size: 0.8em; margin-bottom: 20px;">Upload audio Morse (WAV/M4A/OGG)</p>
     
-    <label for="audioFile" class="upload-area" id="dropLabel">
-        <span>📁 Klik untuk Pilih Audio</span>
+    <label for="audioFile" class="upload-area">
+        <span id="fileName">📁 Pilih File Audio</span>
         <input type="file" id="audioFile" accept="audio/*">
     </label>
 
-    <div id="status">Status: Menunggu file...</div>
-    <button onclick="decodeFile()">⚡ DECODE SEKARANG</button>
+    <div id="status">Status: Ready</div>
+    <button onclick="decodeFile()">⚡ DECODE</button>
     
     <div id="result">HASIL:</div>
 </div>
@@ -37,7 +36,7 @@
     const morseToChar = { ".-":"A", "-...":"B", "-.-.":"C", "-..":"D", ".":"E", "..-.":"F", "--.":"G", "....":"H", "..":"I", ".---":"J", "-.-":"K", ".-..":"L", "--":"M", "-.":"N", "---":"O", ".--.":"P", "--.-":"Q", ".-.":"R", "...":"S", "-":"T", "..-":"U", "...-":"V", ".--":"W", "-..-":"X", "-.--":"Y", "--..":"Z", ".----":"1", "..---":"2", "...--":"3", "....-":"4", ".....":"5", "-....":"6", "--...":"7", "---..":"8", "----.":"9", "-----":"0", "/":" " };
 
     document.getElementById('audioFile').onchange = function() {
-        document.getElementById('status').innerText = "File terpilih: " + this.files[0].name;
+        if(this.files[0]) document.getElementById('fileName').innerText = this.files[0].name;
     };
 
     async function decodeFile() {
@@ -45,9 +44,9 @@
         const status = document.getElementById('status');
         const resultDiv = document.getElementById('result');
 
-        if (!fileInput.files[0]) return alert("Pilih filenya dulu!");
+        if (!fileInput.files[0]) return alert("Mana filenya, Bang?");
 
-        status.innerText = "⏳ Menganalisis Sinyal...";
+        status.innerText = "⏳ Scanning Audio...";
         
         try {
             const arrayBuffer = await fileInput.files[0].arrayBuffer();
@@ -55,26 +54,23 @@
             const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
             const data = audioBuffer.getChannelData(0);
             
-            // Konfigurasi Timing (Sesuai Versi Turbo 0.08s)
             const sampleRate = audioBuffer.sampleRate;
-            const unitInSamples = sampleRate * 0.08; 
             const threshold = 0.15;
 
             let isBeep = false;
             let lastIdx = 0;
             let sequence = [];
 
+            // Analisis Signal vs Silence
             for (let i = 0; i < data.length; i++) {
                 const vol = Math.abs(data[i]);
                 if (!isBeep && vol > threshold) {
-                    sequence.push({ type: 'silence', len: (i - lastIdx) / sampleRate });
+                    sequence.push({ type: 'gap', len: (i - lastIdx) / sampleRate });
                     isBeep = true;
                     lastIdx = i;
                 } else if (isBeep && vol < threshold / 2) {
-                    // Cek hening sejenak buat konfirmasi
                     let confirm = true;
                     for(let j=0; j<200; j++) if(Math.abs(data[i+j]) > threshold) confirm = false;
-                    
                     if(confirm) {
                         sequence.push({ type: 'beep', len: (i - lastIdx) / sampleRate });
                         isBeep = false;
@@ -84,26 +80,38 @@
             }
 
             let currentMorse = "";
-            let finalText = "";
+            let decodedChars = [];
 
             sequence.forEach(part => {
                 if (part.type === 'beep') {
-                    currentMorse += (part.len < 0.18) ? "." : "-";
-                } else {
-                    if (part.len > 0.2) { // Jeda antar huruf
-                        finalText += morseToChar[currentMorse] || "";
+                    // Penentuan Titik vs Garis (Unit Turbo 0.08)
+                    currentMorse += (part.len < 0.15) ? "." : "-";
+                } else if (part.type === 'gap') {
+                    // Jeda antar simbol dalam satu huruf (< 0.2s) -> abaikan
+                    // Jeda antar huruf (0.2s - 0.5s)
+                    if (part.len >= 0.2 && part.len < 0.5) {
+                        if (currentMorse) decodedChars.push(morseToChar[currentMorse] || "?");
+                        currentMorse = "";
+                    } 
+                    // Jeda antar kata (> 0.5s) -> jadi spasi
+                    else if (part.len >= 0.5) {
+                        if (currentMorse) decodedChars.push(morseToChar[currentMorse] || "?");
+                        decodedChars.push(" "); // Spasi asli
                         currentMorse = "";
                     }
-                    if (part.len > 0.5) finalText += " "; // Jeda antar kata
                 }
             });
-            finalText += morseToChar[currentMorse] || "";
 
-            resultDiv.innerText = finalText || "Gagal baca. Pastikan audio morse jernih!";
-            status.innerText = "✅ Berhasil Di-decode!";
+            // Karakter terakhir sisa
+            if (currentMorse) decodedChars.push(morseToChar[currentMorse] || "?");
+
+            // Gabungkan dan bersihkan spasi ganda
+            let finalText = decodedChars.join('').replace(/\s+/g, ' ').trim();
+
+            resultDiv.innerText = finalText || "Gagal decode. Coba lagi, Bang.";
+            status.innerText = "✅ Selesai!";
         } catch (err) {
-            status.innerText = "❌ Format audio ditolak.";
-            console.error(err);
+            status.innerText = "❌ Gagal decode audio.";
         }
     }
 </script>
